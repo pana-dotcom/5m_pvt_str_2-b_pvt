@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>PVT・Stroop・2-back・PVT 統合課題</title>
+<style>
+body{font-family:Arial,sans-serif;text-align:center;margin-top:50px}
+#startOverlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:white;color:#111;font-size:24px;font-weight:bold;user-select:none}
+.screen{display:none}
+/* PVT */
+.pvtInstruction{font-size:40px;font-weight:bold;visibility:hidden}
+.pvtBox{width:300px;height:200px;background:gray;margin:auto;line-height:200px;font-size:40px;color:white;user-select:none}
+.pvtBox.waiting{font-size:80px}
+.preparationMessage{min-height:36px;margin-top:18px;font-size:20px}
+.countdown{min-height:58px;margin-top:8px;font-size:48px;font-weight:bold}
+/* 2-back */
+#nbLetter{font-size:80px;width:120px;height:120px;margin:30px auto 16px;display:flex;align-items:center;justify-content:center;line-height:1}
+.nbFixation{color:white;background:gray;border-radius:10px}
+#nbStatus{min-height:64px;font-size:20px}#nbCountdown{font-size:42px;font-weight:bold;min-height:50px}#nbInstruction{font-size:18px}
+/* Stroop */
+#stTitle{font-size:36px}#stInstruction{font-size:28px;font-weight:bold}
+#stWord{width:100%;height:80px;margin:40px auto;display:flex;align-items:center;justify-content:center;font-family:sans-serif;font-size:64px;font-weight:normal;line-height:1;box-sizing:border-box}
+#stMessage{margin-top:20px;font-size:24px;font-weight:bold;min-height:50px}
+#stKeymap{margin-top:40px;display:flex;flex-direction:column;align-items:center}.arrowRow{display:flex;justify-content:center;align-items:center}.keybox{display:flex;justify-content:center;align-items:center;width:90px;height:90px;margin:5px;border:3px solid #333;border-radius:10px;font-size:30px;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="startOverlay">Enterキーを押して待機を開始してください</div>
+<br>
+<section id="pvtScreen" class="screen">
+ <p id="pvtInstruction" class="pvtInstruction">赤になったらすぐEnterキー！</p>
+ <div id="pvtBox" class="pvtBox waiting">✖</div>
+ <div id="pvtCountdown" class="countdown"></div>
+ <div id="pvtMessage" class="preparationMessage"></div>
+</section>
+<br>
+<section id="nbScreen" class="screen">
+ <h2>2-back</h2>
+ <div id="nbLetter">✖</div>
+ <div id="nbStatus"><div id="nbCountdown"></div><div id="nbInstruction"></div></div>
+</section>
+<br>
+<section id="stScreen" class="screen">
+ <h1 id="stTitle">Stroopテスト</h1>
+ <div id="stWord"></div>
+ <div id="stMessage"></div>
+ <div id="stKeymap">
+  <div class="arrowRow"><div class="keybox">赤</div></div>
+  <div class="arrowRow"><div class="keybox">青</div><div class="keybox">黄</div><div class="keybox">緑</div></div>
+ </div>
+</section>
+<br>
+<script>
+'use strict';
+const END_SCREEN_DURATION=2000;
+const START_TONE={frequency:880,duration:600,volume:.22};
+const WARNING_TONE={frequency:659.25,duration:500,volume:.20};
+let phase='initial',audioContext=null,wakeLock=null,wakeLockRequired=false,keyLocked=false;
+const startOverlay=document.getElementById('startOverlay');
+const screens=[document.getElementById('pvtScreen'),document.getElementById('nbScreen'),document.getElementById('stScreen')];
+function showOnly(screen){screens.forEach(x=>x.style.display=x===screen?'block':'none')}
+function getAudioContext(){if(!audioContext){const C=window.AudioContext||window.webkitAudioContext;if(C)audioContext=new C()}return audioContext}
+async function unlockAudio(){const c=getAudioContext();if(!c)throw new Error('音声機能を利用できません。');if(c.state!=='running')await c.resume();const o=c.createOscillator(),g=c.createGain();g.gain.setValueAtTime(.0001,c.currentTime);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.02)}
+async function playTone(f,d,v=.22){try{const c=getAudioContext();if(!c)return false;if(c.state!=='running')await c.resume();const o=c.createOscillator(),g=c.createGain(),n=c.currentTime,s=d/1000,a=Math.min(.08,s*.25),r=Math.min(.22,s*.45);o.type='sine';o.frequency.setValueAtTime(f,n);g.gain.setValueAtTime(.0001,n);g.gain.exponentialRampToValueAtTime(v,n+a);g.gain.setValueAtTime(v,n+Math.max(a,s-r));g.gain.exponentialRampToValueAtTime(.0001,n+s);o.connect(g);g.connect(c.destination);o.start(n);o.stop(n+s);return true}catch(e){console.error(e);return false}}
+function playStartTone(){void playTone(START_TONE.frequency,START_TONE.duration,START_TONE.volume)}
+function playWarningTone(){void playTone(WARNING_TONE.frequency,WARNING_TONE.duration,WARNING_TONE.volume)}
+async function requestWakeLock(){wakeLockRequired=true;if(!('wakeLock'in navigator))return false;if(wakeLock)return true;try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>wakeLock=null);return true}catch(e){console.warn(e);wakeLock=null;return false}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&wakeLockRequired&&!wakeLock)void requestWakeLock()});
+window.addEventListener('pagehide',()=>{wakeLockRequired=false;if(wakeLock)void wakeLock.release()});
+function formatTime(d){return[d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':')}
+function stamp(){const d=new Date();return`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`}
+function csvEscape(v){const s=String(v??'');return /[",\n\r]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}
+function downloadRows(name,rows){const csv='\uFEFF'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${name}_${stamp()}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function endScreen(screen,element,text,next){playStartTone();showOnly(screen);element.textContent=text;setTimeout(next,END_SCREEN_DURATION)}
+
+/* ---------- PVT 共通 ---------- */
+const pvtBox=document.getElementById('pvtBox'),pvtInstruction=document.getElementById('pvtInstruction'),pvtCountdown=document.getElementById('pvtCountdown'),pvtMessage=document.getElementById('pvtMessage');
+let pvtSession=0,pvtRunning=false,pvtWaiting=false,pvtResults=[],pvtStartPerf=null,pvtNextPerf=null,pvtTaskStart=null,pvtTaskEnd=null,pvtStimulusTimer=null,pvtEndTimer=null,pvtPreparationTimer=null,pvtCountdownTimer=null;
+function beginPVTPreparation(duration,session){phase='pvt-prep';pvtSession=session;showOnly(document.getElementById('pvtScreen'));pvtInstruction.style.visibility='hidden';pvtBox.style.background='gray';pvtBox.classList.add('waiting');pvtBox.textContent='✖';pvtCountdown.textContent='';pvtMessage.textContent='開始まで注視点を見て待機してください';setTimeout(()=>startPVTCountdown(),duration-5000);pvtPreparationTimer=setTimeout(startPVT,duration)}
+function startPVTCountdown(){if(phase!=='pvt-prep')return;playWarningTone();pvtMessage.textContent='';let n=5;pvtCountdown.textContent=n;pvtCountdownTimer=setInterval(()=>{n--;pvtCountdown.textContent=n>0?n:'';if(n<=0)clearInterval(pvtCountdownTimer)},1000)}
+function startPVT(){phase='pvt';pvtRunning=true;pvtResults=[];clearInterval(pvtCountdownTimer);pvtCountdown.textContent='';pvtMessage.textContent='';pvtInstruction.style.visibility='visible';playStartTone();pvtTaskStart=new Date();pvtEndTimer=setTimeout(endPVT,270000);nextPVTTrial()}
+function nextPVTTrial(){if(!pvtRunning)return;clearTimeout(pvtStimulusTimer);pvtBox.style.background='gray';pvtBox.classList.add('waiting');pvtBox.textContent='✖';pvtWaiting=true;pvtStartPerf=null;const delay=Math.random()*8000+2000;pvtNextPerf=performance.now()+delay;pvtStimulusTimer=setTimeout(()=>requestAnimationFrame(()=>{if(!pvtRunning)return;pvtBox.style.background='red';pvtBox.classList.remove('waiting');pvtBox.textContent='Enter!';pvtStartPerf=performance.now();pvtWaiting=false}),delay)}
+function handlePVT(){if(!pvtRunning)return;if(pvtWaiting){pvtResults.push({trial:'',RT:-Math.max(0,Math.round(pvtNextPerf-performance.now()))});return}const rt=Math.round(performance.now()-pvtStartPerf),trial=pvtResults.filter(x=>x.trial!=='').length+1;pvtResults.push({trial,RT:rt});nextPVTTrial()}
+function exportPVT(){const rows=[['trial','RT','time']];pvtResults.forEach((r,i)=>rows.push([r.trial,r.RT,i===0?formatTime(pvtTaskStart):i===1?formatTime(pvtTaskEnd):'']));if(pvtResults.length===0){rows.push(['','',formatTime(pvtTaskStart)],['','',formatTime(pvtTaskEnd)])}else if(pvtResults.length===1)rows.push(['','',formatTime(pvtTaskEnd)]);downloadRows('pvt',rows)}
+function endPVT(){if(!pvtRunning)return;pvtRunning=false;pvtWaiting=false;pvtTaskEnd=new Date();clearTimeout(pvtStimulusTimer);clearTimeout(pvtEndTimer);exportPVT();pvtInstruction.style.visibility='hidden';pvtMessage.textContent='';pvtCountdown.textContent='';pvtBox.style.background='black';pvtBox.classList.remove('waiting');endScreen(document.getElementById('pvtScreen'),pvtBox,'終了',()=>pvtSession===1?beginStroopPreparation():finishAll())}
+
+/* ---------- 2-back ---------- */
+const NB_TOTAL=226,NB_TARGETS_PER_HALF=28,NB_BLOCK=28,NB_BASE=['B','F','K','H','M','Q','R','T'];
+const nbLetter=document.getElementById('nbLetter'),nbCountdown=document.getElementById('nbCountdown'),nbInstruction=document.getElementById('nbInstruction');
+let nbRunning=false,nbSequence=[],nbShown=[],nbLogs=[],nbResponses=[],nbIndex=0,nbTrialStart=null,nbStartDate=null,nbEndDate=null,nbStimulusTimer=null,nbFixationTimer=null,nbCountdownTimer=null;
+function nbFix(){nbLetter.textContent='✖';nbLetter.classList.add('nbFixation')}function nbStim(x){nbLetter.textContent=x;nbLetter.classList.remove('nbFixation')}
+function randomChoice(a){return a[Math.floor(Math.random()*a.length)]}function randomInt(a,b){return a+Math.floor(Math.random()*(b-a+1))}function shuffleInPlace(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function nbBlockCounts(){const c=[];let r=28;for(let i=0;i<3;i++){const left=3-i,min=Math.max(5,r-left*9),max=Math.min(9,r-left*5),v=randomInt(min,max);c.push(v);r-=v}c.push(r);return shuffleInPlace(c)}
+function nbHalf(start){const counts=nbBlockCounts(),p=[];for(let b=0;b<4;b++){const s=start+b*28,c=Array.from({length:28},(_,i)=>s+i);shuffleInPlace(c);p.push(...c.slice(0,counts[b]))}return p}
+function validTargets(t){if(t.length!==56||new Set(t).size!==56)return false;if(t.filter(p=>p>=2&&p<=113).length!==28||t.filter(p=>p>=114&&p<=225).length!==28)return false;for(let b=0;b<8;b++){const s=2+b*28,n=t.filter(p=>p>=s&&p<=s+27).length;if(n<5||n>9)return false}if(t[0]-2>=12||225-t.at(-1)>=12)return false;for(let i=1;i<t.length;i++)if(t[i]-t[i-1]-1>=12)return false;for(let i=2;i<t.length;i++)if(t[i]===t[i-1]+1&&t[i-1]===t[i-2]+1)return false;return true}
+function nbTargets(){for(let a=0;a<100000;a++){const t=[...nbHalf(2),...nbHalf(114)].sort((x,y)=>x-y);if(validTargets(t))return new Set(t)}throw Error('ターゲット配置生成失敗')}
+function generateNB(){const targets=nbTargets(),seq=[];for(let i=0;i<NB_TOTAL;i++){let b;if(i<2)b=randomChoice(NB_BASE);else if(targets.has(i))b=seq[i-2].toUpperCase();else b=randomChoice(NB_BASE.filter(x=>x!==seq[i-2].toUpperCase()));seq.push(Math.random()<.5?b.toLowerCase():b)}return seq}
+function beginNBPreparation(){phase='nb-prep';showOnly(document.getElementById('nbScreen'));nbFix();nbCountdown.textContent='';nbInstruction.textContent='開始まで注視点を見て待機してください';try{nbSequence=generateNB()}catch(e){nbInstruction.textContent='刺激列を生成できませんでした。';return}setTimeout(startNBCountdown,25000);setTimeout(startNB,30000)}
+function startNBCountdown(){if(phase!=='nb-prep')return;playWarningTone();nbInstruction.textContent='';let n=5;nbCountdown.textContent=n;nbCountdownTimer=setInterval(()=>{n--;nbCountdown.textContent=n>0?n:'';if(n<=0)clearInterval(nbCountdownTimer)},1000)}
+function startNB(){phase='nb';nbRunning=true;nbIndex=0;nbShown=[];nbLogs=[];nbTrialStart=null;clearInterval(nbCountdownTimer);nbCountdown.textContent='';nbInstruction.textContent='2つ前の文字と一致時はEnterキーを押す';playStartTone();nbStartDate=new Date();nbFix();nbFixationTimer=setTimeout(nextNB,2000)}
+function nextNB(){if(!nbRunning)return;if(nbIndex>=NB_TOTAL){endNB();return}nbResponses=[];const l=nbSequence[nbIndex];nbShown.push(l);nbStim(l);nbTrialStart=performance.now();nbIndex++;nbStimulusTimer=setTimeout(()=>{if(!nbRunning)return;nbFix();nbFixationTimer=setTimeout(()=>{if(!nbRunning)return;evalNB();nbTrialStart=null;nextNB()},2000)},500)}
+function handleNB(){if(!nbRunning||nbTrialStart===null)return;const rt=Math.round(performance.now()-nbTrialStart);if(rt>=0&&rt<2500)nbResponses.push(rt)}
+function evalNB(){if(nbIndex<3)return;const no=nbIndex-2,target=nbShown[nbIndex-1].toLowerCase()===nbShown[nbIndex-3].toLowerCase();if(!nbResponses.length){nbLogs.push([no,'',target?3:6]);return}const rt=nbResponses[0],code=target?(rt<=100?1:2):(rt<=100?4:5);nbLogs.push([no,rt,code]);for(let i=1;i<nbResponses.length;i++)nbLogs.push(['',-nbResponses[i],7])}
+function exportNB(){const rows=[['trial','RT','ResultCode','Time','Summary','']];const targets=nbSequence.slice(2).filter((x,i)=>x.toLowerCase()===nbSequence[i].toLowerCase()).length,count=Math.max(nbLogs.length,13);for(let i=0;i<count;i++){const l=nbLogs[i]||['','',''];rows.push([l[0],l[1],l[2],i===0?formatTime(nbStartDate):i===1?formatTime(nbEndDate):'',i===0?`Target=${targets}`:i===1?`NonTarget=${224-targets}`:i===2?`Rate=${(targets/224*100).toFixed(2)}%`:'',''])}const table=[[1,'Miss（早期）'],[2,'Hit（有効）'],[3,'Miss（無反応）'],[4,'FA（早期）'],[5,'FA（有効）'],[6,'CR（無反応）'],[7,'対象外（重複）']];rows[5][4]='Code';rows[5][5]='Meaning';table.forEach((x,i)=>{rows[6+i][4]=x[0];rows[6+i][5]=x[1]});downloadRows('n-back',rows)}
+function endNB(){if(!nbRunning)return;nbRunning=false;nbTrialStart=null;clearTimeout(nbStimulusTimer);clearTimeout(nbFixationTimer);nbEndDate=new Date();exportNB();nbInstruction.textContent='';nbLetter.classList.remove('nbFixation');endScreen(document.getElementById('nbScreen'),nbLetter,'終了',()=>beginPVTPreparation(30000,2))}
+
+/* ---------- Stroop ---------- */
+const ST_TOTAL=226,stTexts=['赤','青','緑','黄'],stColors=['red','blue','green','gold'],stKeyMap={arrowup:'red',arrowleft:'blue',arrowright:'green',arrowdown:'gold'};
+const stBlocks=[{size:28,c:{1:7,2:14,3:7}},{size:28,c:{1:7,2:14,3:7}},{size:28,c:{1:7,2:14,3:7}},{size:29,c:{1:7,2:15,3:7}},{size:28,c:{1:7,2:14,3:7}},{size:28,c:{1:7,2:14,3:7}},{size:28,c:{1:7,2:14,3:7}},{size:29,c:{1:8,2:14,3:7}}];
+const stWord=document.getElementById('stWord'),stMessage=document.getElementById('stMessage'),stKeymap=document.getElementById('stKeymap');
+let stRunning=false,stWaiting=false,stSequence=[],stLog=[],stPending=[],stIndex=0,stCurrent=null,stStartPerf=null,stStartDate=null,stEndDate=null,stVisible=false,stFirst=false,stFixTimer=null,stStimTimer=null,stCountTimer=null;
+function shuffle(a){return shuffleInPlace([...a])}function four(a,v){return a.length>=3&&a.at(-1)===v&&a.at(-2)===v&&a.at(-3)===v}
+function stConditions(){const all=[];for(const b of stBlocks){let chosen=null;for(let k=0;k<10000;k++){const q=[];for(let i=0;i<b.c[1];i++)q.push(1);for(let i=0;i<b.c[2];i++)q.push(2);for(let i=0;i<b.c[3];i++)q.push(3);const s=shuffle(q),z=[...all,...s];if(!z.some((v,i)=>i>=3&&v===z[i-1]&&v===z[i-2]&&v===z[i-3])){chosen=s;break}}if(!chosen)throw Error('条件系列生成失敗');all.push(...chosen)}return all}
+function stCandidates(c){const a=[];if(c===1)for(let i=0;i<4;i++)a.push({condition:c,text:stTexts[i],color:stColors[i],id:stTexts[i]+'_'+stColors[i]});if(c===2)for(let i=0;i<4;i++)for(let j=0;j<4;j++)if(i!==j)a.push({condition:c,text:stTexts[i],color:stColors[j],id:stTexts[i]+'_'+stColors[j]});if(c===3)for(let i=0;i<4;i++)a.push({condition:c,text:'●',color:stColors[i],id:'●_'+stColors[i]});return a}
+function generateStroop(){for(let z=0;z<1000;z++){const cond=stConditions(),tr=[];let fail=false;for(const c of cond){const x=shuffle(stCandidates(c)).find(v=>(!tr.length||tr.at(-1).id!==v.id)&&!four(tr.map(t=>t.color),v.color));if(!x){fail=true;break}tr.push({...x})}if(!fail&&tr.length===226)return tr}throw Error('刺激系列生成失敗')}
+function beginStroopPreparation(){phase='st-prep';showOnly(document.getElementById('stScreen'));stKeymap.style.display='none';stWord.textContent='✖';stWord.style.color='black';stMessage.textContent='開始まで注視点を見て待機してください';try{stSequence=generateStroop()}catch(e){stMessage.textContent='系列の生成に失敗しました。';return}setTimeout(startStCountdown,25000);setTimeout(startStroop,30000)}
+function startStCountdown(){if(phase!=='st-prep')return;playWarningTone();let n=5;stMessage.style.fontSize='42px';stMessage.textContent=n;stCountTimer=setInterval(()=>{n--;stMessage.textContent=n>0?n:'';if(n<=0)clearInterval(stCountTimer)},1000)}
+function startStroop(){phase='st';stRunning=true;stIndex=0;stLog=[];stPending=[];clearInterval(stCountTimer);stMessage.textContent='';stMessage.style.fontSize='24px';stKeymap.style.display='flex';playStartTone();stStartDate=new Date();showStFix()}
+function showStFix(){if(!stRunning)return;if(stIndex>=ST_TOTAL){endStroop();return}stCurrent=null;stVisible=false;stFirst=false;stWord.textContent='✖';stWord.style.color='black';stFixTimer=setTimeout(showStStim,500)}
+function showStStim(){if(!stRunning)return;stCurrent=stSequence[stIndex];stFirst=false;stCurrent.firstRT='';stCurrent.correct=0;stCurrent.code=4;stWord.textContent=stCurrent.text;stWord.style.color=stCurrent.color;stStartPerf=performance.now();stPending.forEach(r=>stLog.push({trial:'',condition:r.condition,rt:Math.round(r.time-stStartPerf),code:5,correct:'',sort:r.time}));stPending=[];stVisible=true;stStimTimer=setTimeout(finishStTrial,2000)}
+function handleStroop(e){if(!stRunning||!stVisible||e.repeat)return;const key=e.key.toLowerCase();if(!(key in stKeyMap))return;e.preventDefault();const t=performance.now(),rt=Math.round(t-stStartPerf);if(rt<0||rt>2000)return;if(!stFirst){stFirst=true;stCurrent.firstRT=rt;stCurrent.correct=stKeyMap[key]===stCurrent.color?1:0;stCurrent.code=rt<=100?3:(stCurrent.correct?1:2)}else stPending.push({time:t,condition:stCurrent.condition})}
+function finishStTrial(){if(!stRunning||!stCurrent)return;stVisible=false;if(!stFirst){stCurrent.firstRT='';stCurrent.correct=0;stCurrent.code=4}stLog.push({trial:stIndex+1,condition:stCurrent.condition,rt:stCurrent.firstRT,code:stCurrent.code,correct:stCurrent.correct,sort:stStartPerf});stIndex++;showStFix()}
+function exportStroop(){stPending.forEach(r=>stLog.push({trial:'',condition:r.condition,rt:'',code:5,correct:'',sort:r.time}));stPending=[];stLog.sort((a,b)=>a.sort-b.sort);const counts={1:0,2:0,3:0};stSequence.forEach(x=>counts[x.condition]++);const rows=Array.from({length:Math.max(stLog.length+1,12)},()=>Array(8).fill(''));rows[0]=['trial','条件','RT','Code','正誤','Time','Summary','Count'];stLog.forEach((r,i)=>rows[i+1].splice(0,5,r.trial,r.condition,r.rt,r.code,r.correct));rows[1][5]=formatTime(stStartDate);rows[2][5]=formatTime(stEndDate);[1,2,3].forEach((c,i)=>{rows[i+1][6]=`条件${c}`;rows[i+1][7]=counts[c]});rows[5][6]='Code';rows[5][7]='区分';[['1','正答（有効）'],['2','誤答（有効）'],['3','対象外（早期）'],['4','対象外（無反応）'],['5','対象外（重複）']].forEach((x,i)=>{rows[6+i][6]=x[0];rows[6+i][7]=x[1]});downloadRows('stroop',rows)}
+function endStroop(){if(!stRunning)return;stRunning=false;stVisible=false;clearTimeout(stFixTimer);clearTimeout(stStimTimer);stEndDate=new Date();exportStroop();stKeymap.style.display='none';endScreen(document.getElementById('stScreen'),stWord,'終了！',beginNBPreparation)}
+function finishAll(){phase='finished';wakeLockRequired=false;if(wakeLock)void wakeLock.release()}
+
+/* ---------- 入力 ---------- */
+document.addEventListener('keydown',async e=>{
+ if(phase==='initial'&&e.key==='Enter'&&!e.repeat){e.preventDefault();phase='starting';try{await unlockAudio();await requestWakeLock();startOverlay.style.display='none';playWarningTone();beginPVTPreparation(300000,1)}catch(err){console.error(err);phase='initial'}return}
+ if(e.key==='Enter'){if(e.repeat||keyLocked)return;keyLocked=true;if(phase==='pvt')handlePVT();else if(phase==='nb')handleNB();return}
+ if(phase==='st')handleStroop(e)
+});
+document.addEventListener('keyup',e=>{if(e.key==='Enter')keyLocked=false});
+</script>
+</body>
+</html>
